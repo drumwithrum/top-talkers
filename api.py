@@ -2,8 +2,10 @@ import os
 from flask import Flask, request, Response
 import pyshark
 import collections
+from flask_cors import CORS
 
 api = Flask(__name__)
+CORS(api)
 
 #name of the parameter in body to store file in
 FILE_PARAM = 'data'
