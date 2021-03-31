@@ -59,7 +59,6 @@ def upload():
             packetArray = parsedPacket.split(" ")
             ipAddress = packetArray[SOURCE_INDEX]
             packetSize = int(packetArray[PACKET_SIZE_INDEX])
-
             #checks if there is an ip address in packet and if packet is not malformed
             if ipAddress and MALFORMED not in parsedPacket:
                 if ipAddress in ipAddresses:
@@ -72,10 +71,11 @@ def upload():
                 else:
                     packets[packetSize] = 1
         except:
-            cap.close()
+            continue
         else:
-            cap.close()
+            continue
 
+    cap.close()
     #parsing ip addresses collection to array with collections
     for key, val in ipAddresses.items():
             talker = {'ip': key, 'load': bytesToKiloBytes(val), 'unit': 'kB'}
