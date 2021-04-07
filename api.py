@@ -2,6 +2,8 @@ import os
 from flask import Flask, request, Response
 import pyshark
 import collections
+import math
+import numpy as np
 from flask_cors import CORS
 
 api = Flask(__name__)
@@ -18,14 +20,22 @@ PACKET_SIZE_INDEX = 5
 KILOBYTE_SIZE = 1024
 MINIMUM_SIZE = 0.1
 MALFORMED = 'malformed'
+SECOND_LAYER_IDENTIFIER = 'II'
+
+def float_round(num, places = 0, direction = math.floor):
+    return direction(num * (10**places)) / float(10**places)
 
 #check if file has correct extension
 def isFileAllowed(filename):
     extension = filename.rsplit('.', 1)[1].lower()
     return '.' in filename and extension in ALLOWED_EXTENSIONS
 
-def bytesToKiloBytes(bytes):
-    kilobytes = round(bytes / KILOBYTE_SIZE, 1)
+def bytesToKiloBytes(bytes, decimalPlaces = 1, ceil = False):
+    kilobytes = 0
+    if ceil:
+        kilobytes = float_round(bytes / KILOBYTE_SIZE, decimalPlaces, math.ceil)
+    else:
+        kilobytes = round(bytes / KILOBYTE_SIZE, decimalPlaces)
     return kilobytes if kilobytes > MINIMUM_SIZE else MINIMUM_SIZE
 
 @api.route('/files', methods=['POST'])
@@ -51,8 +61,12 @@ def upload():
     ipAddresses = {}
     packets = {}
     outputPackets = {}
+    edgeRanges = [0]
+    biggestPacket = 0
+    ranges = []
     topTalkers = []
     packetStats = []
+    
     for packet in cap:
         try:
             parsedPacket = str(packet)
@@ -60,7 +74,7 @@ def upload():
             ipAddress = packetArray[SOURCE_INDEX]
             packetSize = int(packetArray[PACKET_SIZE_INDEX])
             #checks if there is an ip address in packet and if packet is not malformed
-            if ipAddress and MALFORMED not in parsedPacket:
+            if ipAddress and MALFORMED not in parsedPacket and SECOND_LAYER_IDENTIFIER not in parsedPacket:
                 if ipAddress in ipAddresses:
                     ipAddresses[ipAddress] = ipAddresses[ipAddress] + packetSize
                 else:
@@ -81,13 +95,38 @@ def upload():
             talker = {'ip': key, 'load': bytesToKiloBytes(val), 'unit': 'kB'}
             topTalkers.append(talker)
 
-    #parsing packets collection to array with collections
+
     for key, val in packets.items():
-            kilobytesKey = bytesToKiloBytes(key)
-            if kilobytesKey in outputPackets:
-                outputPackets[kilobytesKey] = outputPackets[kilobytesKey] + val
-            else:
-                outputPackets[kilobytesKey] = val
+            rangeItem = bytesToKiloBytes(key, 1)
+            if biggestPacket < bytesToKiloBytes(key, 1, True):
+                biggestPacket = bytesToKiloBytes(key, 1, True)
+            if rangeItem not in edgeRanges:
+                edgeRanges.append(rangeItem)
+    
+    edgeRanges = sorted(edgeRanges)
+    areRangesEven = len(edgeRanges) % 2 == 0
+    lastRange = -1
+    if not areRangesEven:
+        lastRange = edgeRanges.pop()
+    
+    ranges = np.array_split(edgeRanges, math.floor(len(edgeRanges) / 2))
+    if lastRange > 0:
+        ranges.append([edgeRanges[len(edgeRanges) - 1], lastRange])
+
+    for key, val in packets.items():
+        currRange = ''
+        # kilobytesKey = bytesToKiloBytes(key)
+        for arr in ranges:
+            if len(arr) == 1:
+                currRange = str(arr[0])
+                continue
+            if bytesToKiloBytes(key) >= arr[0] and bytesToKiloBytes(key) <= arr[1]:
+                currRange = str(arr[0]) + ' - ' + str(arr[1])
+                break
+        if currRange in outputPackets:
+            outputPackets[currRange] = outputPackets[currRange] + val
+        else:
+            outputPackets[currRange] = val
 
     for key, val in sorted(outputPackets.items()):
             packetStat = {'size': key, 'unit': 'kB', 'amount': val}
